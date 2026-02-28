@@ -1,0 +1,10 @@
+fastapi[standard]
+starlette
+pydantic
+torch
+image
+numpy
+ultralytics
+uvicorn
+gunicorn
+opencv-python-headless
