@@ -16,8 +16,24 @@ export function listSessions({ limit = 20, offset = 0 } = {}) {
 
   const countRow = db.prepare('SELECT COUNT(*) AS total FROM sessions').get();
 
+  // Attach per-category breakdown to each session
+  const catStmt = db.prepare(
+    `SELECT category, SUM(amount_kg) AS total_kg, COUNT(*) AS count
+     FROM detection_results WHERE session_id = ?
+     GROUP BY category ORDER BY total_kg DESC`
+  );
+
+  const sessions = rows.map((row) => {
+    const categories = catStmt.all(row.session_id).map((c) => ({
+      category: c.category,
+      total_kg: c.total_kg,
+      count: c.count,
+    }));
+    return { ...formatSession(row), categories };
+  });
+
   return {
-    sessions: rows.map(formatSession),
+    sessions,
     total: countRow.total,
     limit,
     offset,

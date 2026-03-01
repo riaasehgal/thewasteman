@@ -6,8 +6,6 @@ import { handleHealth } from './routes/health.js';
 import { handleSessionsList } from './routes/sessionsList.js';
 import { handleSessionGet } from './routes/sessionGet.js';
 import { handleSessionIngest } from './routes/sessionIngest.js';
-import { requireStaffAuth } from './auth/staffAuth.js';
-import { requireDeviceAuth } from './auth/deviceAuth.js';
 import { tryServeStatic } from './static.js';
 
 // --------------- helpers ---------------
@@ -54,26 +52,23 @@ async function router(req, res) {
       return;
     }
 
-    // POST /api/sessions — device ingestion (device secret auth)
+    // POST /api/sessions — device ingestion (no auth for prototyping)
     if (req.method === 'POST' && pathname === '/api/sessions') {
-      if (!requireDeviceAuth(req, res)) { log(req, 401); return; }
       await handleSessionIngest(req, res);
       log(req, res.statusCode);
       return;
     }
 
-    // GET /api/sessions — list (staff auth)
+    // GET /api/sessions — list
     if (req.method === 'GET' && pathname === '/api/sessions') {
-      if (!requireStaffAuth(req, res)) { log(req, 401); return; }
       handleSessionsList(req, res, query);
       log(req, 200);
       return;
     }
 
-    // GET /api/sessions/:session_id — detail (staff auth)
+    // GET /api/sessions/:session_id — detail
     const sessionMatch = pathname.match(/^\/api\/sessions\/([^/]+)$/);
     if (req.method === 'GET' && sessionMatch) {
-      if (!requireStaffAuth(req, res)) { log(req, 401); return; }
       handleSessionGet(req, res, sessionMatch[1]);
       log(req, res.statusCode);
       return;

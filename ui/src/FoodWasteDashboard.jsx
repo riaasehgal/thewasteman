@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-
-const API = "https://jr3-api.joaopferreira.me/api";
+import { fetchSessions, fetchSession } from "./lib/api.js";
 
 function wasteBadge(pct) {
   if (pct < 15) return { bg: "bg-emerald-500/10", text: "text-emerald-400", border: "border-emerald-500/20" };
@@ -33,34 +32,23 @@ function formatTime(t) {
   return `${hour % 12 || 12}:${m} ${hour < 12 ? "AM" : "PM"}`;
 }
 
-const MOCK_SESSIONS = [
-  { id: 1, name: "Oct 24 — Lunch",     type: "Lunch",     items: 452, waste: 12 },
-  { id: 2, name: "Oct 24 — Breakfast", type: "Breakfast", items: 310, waste: 18 },
-  { id: 3, name: "Oct 23 — Dinner",    type: "Dinner",    items: 528, waste: 32 },
-  { id: 4, name: "Oct 23 — Lunch",     type: "Lunch",     items: 412, waste: 9  },
-  { id: 5, name: "Oct 23 — Breakfast", type: "Breakfast", items: 285, waste: 24 },
-];
+// Helper: format a session date for card display
+function formatSessionDate(iso) {
+  if (!iso) return "Unknown";
+  const d = new Date(iso);
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" })
+    + " — "
+    + d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+}
 
-const MOCK_STATS = {
-  totalItems: 1245,
-  avgWaste: 24,
-  mostWasted: "Pasta",
-  chartData: [
-    { label: "Pasta",      pct: 42 },
-    { label: "Pizza",      pct: 28 },
-    { label: "Vegetables", pct: 18 },
-    { label: "Salad",      pct: 12 },
-    { label: "Bread",      pct: 8  },
-  ],
-  feed: [
-    { item: "Mashed Potatoes",  time: "12:45 PM", waste: 45 },
-    { item: "Grilled Chicken",  time: "12:42 PM", waste: 12 },
-    { item: "Penne Arrabbiata", time: "12:38 PM", waste: 68 },
-    { item: "Steamed Broccoli", time: "12:35 PM", waste: 5  },
-    { item: "Margherita Pizza", time: "12:30 PM", waste: 24 },
-    { item: "Green Salad",      time: "12:28 PM", waste: 15 },
-  ],
-};
+// Helper: derive meal type from hour
+function getMealType(iso) {
+  if (!iso) return "Lunch";
+  const h = new Date(iso).getHours();
+  if (h < 11) return "Breakfast";
+  if (h < 16) return "Lunch";
+  return "Dinner";
+}
 
 const MOCK_REPORT = {
   stats: [
@@ -148,9 +136,65 @@ function Toggle({ on, onToggle }) {
 
 // ── Sessions Screen ───────────────────────────────────────────────────────────
 function SessionsScreen({ onSelect, onNavigate, settings }) {
+  const [sessions, setSessions] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    setLoading(true);
+    fetchSessions({ limit: 50 })
+      .then(data => {
+        // Map API sessions to the shape the UI expects
+        const mapped = (data.sessions || []).map(s => {
+          const mealType = getMealType(s.start_time);
+          const totalWasteKg = (s.categories || []).reduce((sum, c) => sum + (c.total_kg || 0), 0);
+          const detections = s.summary?.total_detections ?? (s.categories || []).reduce((sum, c) => sum + (c.count || 0), 0);
+          return {
+            id: s.session_id,
+            session_id: s.session_id,
+            name: formatSessionDate(s.start_time),
+            type: mealType,
+            items: detections,
+            waste: totalWasteKg,
+            wasteDisplay: `${totalWasteKg.toFixed(1)} kg`,
+            categories: s.categories || [],
+            device_id: s.device_id,
+            start_time: s.start_time,
+            duration_sec: s.duration_sec,
+          };
+        });
+        setSessions(mapped);
+        setTotal(data.total || mapped.length);
+      })
+      .catch(err => setError(err.message))
+      .finally(() => setLoading(false));
+  }, []);
+
   const [filter, setFilter] = useState("All Sessions");
   const tabs = ["All Sessions", "Breakfast", "Lunch", "Dinner"];
-  const visible = filter === "All Sessions" ? MOCK_SESSIONS : MOCK_SESSIONS.filter(s => s.type === filter);
+  const visible = filter === "All Sessions" ? sessions : sessions.filter(s => s.type === filter);
+
+  if (loading) {
+    return (
+      <div className="flex flex-col min-h-screen items-center justify-center" style={{ background: "#121212", color: "#f3f4f6" }}>
+        <div className="w-10 h-10 rounded-full border-4 border-emerald-800 border-t-emerald-400 animate-spin mb-4" />
+        <p className="text-gray-400 text-sm">Loading sessions…</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col min-h-screen items-center justify-center" style={{ background: "#121212", color: "#f3f4f6" }}>
+        <p className="text-red-400 mb-2">Failed to load sessions</p>
+        <p className="text-gray-500 text-sm">{error}</p>
+        <button onClick={() => window.location.reload()} className="mt-4 px-4 py-2 rounded-lg text-sm font-bold" style={{ background: "#51904e", color: "#fff" }}>
+          Retry
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col min-h-screen" style={{ background: "#121212", color: "#f3f4f6", fontFamily: "'Public Sans', sans-serif" }}>
@@ -179,57 +223,48 @@ function SessionsScreen({ onSelect, onNavigate, settings }) {
 
           <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 flex-1">
             {visible.map(session => {
-              const b = wasteBadge(session.waste);
               const timeRange = settings.times[session.type];
-              const timeStr = `${formatTime(timeRange.start)} - ${formatTime(timeRange.end)}`;
+              const timeStr = timeRange ? `${formatTime(timeRange.start)} - ${formatTime(timeRange.end)}` : "";
               return (
                 <div key={session.id} onClick={() => onSelect(session)}
                   className="cursor-pointer rounded-xl overflow-hidden transition-all"
                   style={{ background: "#1C1C1C", border: "1px solid rgba(255,255,255,0.05)" }}
                   onMouseEnter={e => e.currentTarget.style.outline = "2px solid rgba(81,144,78,0.5)"}
                   onMouseLeave={e => e.currentTarget.style.outline = "none"}>
-                  <div className="h-40 bg-cover bg-center" style={{ backgroundImage: `url(${
-                    session.type === "Breakfast"
-                      ? ["https://images.unsplash.com/photo-1533089860892-a7c6f0a88666?w=400",
-                         "https://images.unsplash.com/photo-1484723091739-30a097e8f929?w=400",
-                         "https://images.unsplash.com/photo-1525351484163-7529414344d8?w=400",
-                         "https://images.unsplash.com/photo-1608039829572-78524f79c4c7?w=400",
-                         "https://images.unsplash.com/photo-1506084868230-bb9d95c24759?w=400",
-                         "https://images.unsplash.com/photo-1494597564530-871f2b93ac55?w=400",
-                         "https://images.unsplash.com/photo-1493770348161-369560ae357d?w=400",
-                         "https://images.unsplash.com/photo-1518779578993-ec3579fee39f?w=400"][session.id % 8]
-                    : session.type === "Lunch"
-                      ? ["https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400",
-                         "https://images.unsplash.com/photo-1512621776951-a57141f2eefd?w=400",
-                         "https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=400",
-                         "https://images.unsplash.com/photo-1498837167922-ddd27525d352?w=400",
-                         "https://images.unsplash.com/photo-1540189549336-e6e99c3679fe?w=400",
-                         "https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?w=400",
-                         "https://images.unsplash.com/photo-1473093226555-0465b66fd45d?w=400",
-                         "https://images.unsplash.com/photo-1455619452474-d2be8b1e70cd?w=400"][session.id % 8]
-                      : ["https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=400",
-                         "https://images.unsplash.com/photo-1559847844-5315695dadae?w=400",
-                         "https://images.unsplash.com/photo-1466637574441-749b8f19452f?w=400",
-                         "https://images.unsplash.com/photo-1467003909585-2f8a72700288?w=400",
-                         "https://images.unsplash.com/photo-1432139555190-58524dae6a55?w=400",
-                         "https://images.unsplash.com/photo-1476224203421-9ac39bcb3327?w=400",
-                         "https://images.unsplash.com/photo-1485963631004-f2f00b1d6606?w=400",
-                         "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=400"][session.id % 8]
-                  })` }} />
                   <div className="p-5 space-y-3">
                     <div className="flex justify-between items-start">
                       <div>
                         <h3 className="font-bold text-lg">{session.name}</h3>
-                        <p className="text-sm flex items-center gap-1 mt-0.5" style={{ color: "#6b7280" }}>⏰ {timeStr}</p>
+                        <p className="text-sm flex items-center gap-1 mt-0.5" style={{ color: "#6b7280" }}>
+                          ⏰ {session.type} {timeStr && `· ${timeStr}`}
+                        </p>
                       </div>
-                      <span className={`px-2.5 py-1 rounded-full text-xs font-bold border ${b.bg} ${b.text} ${b.border}`}>
-                        {session.waste}% Waste
+                      <span className="px-2.5 py-1 rounded-full text-xs font-bold border bg-emerald-500/10 text-emerald-400 border-emerald-500/20">
+                        {session.wasteDisplay}
                       </span>
                     </div>
+
+                    {/* Category breakdown */}
+                    {session.categories.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {session.categories.slice(0, 5).map(cat => (
+                          <span key={cat.category}
+                            className="text-xs rounded-full px-2 py-0.5 capitalize"
+                            style={{ background: "rgba(81,144,78,0.1)", color: "#93c16d" }}>
+                            {cat.category}: {Number(cat.total_kg).toFixed(2)} kg
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
                     <div className="flex items-center justify-between pt-2" style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }}>
                       <div>
-                        <p className="text-xs font-bold uppercase tracking-wider" style={{ color: "#6b7280" }}>Total Items</p>
+                        <p className="text-xs font-bold uppercase tracking-wider" style={{ color: "#6b7280" }}>Detections</p>
                         <p className="font-semibold">{session.items}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold uppercase tracking-wider" style={{ color: "#6b7280" }}>Device</p>
+                        <p className="font-semibold text-sm">{session.device_id || "—"}</p>
                       </div>
                       <span style={{ color: "#51904e" }}>→</span>
                     </div>
@@ -247,7 +282,7 @@ function SessionsScreen({ onSelect, onNavigate, settings }) {
           </div>
 
           <div className="p-6 flex items-center justify-between" style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }}>
-            <p className="text-sm text-gray-500">Showing {visible.length} of 24 sessions</p>
+            <p className="text-sm text-gray-500">Showing {visible.length} of {total} sessions</p>
             <div className="flex gap-2">
               {["‹","›"].map(ch => (
                 <button key={ch} className="w-9 h-9 rounded-lg flex items-center justify-center text-gray-400 transition-all"
@@ -267,20 +302,42 @@ function SessionsScreen({ onSelect, onNavigate, settings }) {
 
 // ── Dashboard Screen ──────────────────────────────────────────────────────────
 function DashboardScreen({ session, onBack, onNavigate, settings }) {
-  const [stats] = useState(MOCK_STATS);
-  const [feed, setFeed] = useState(MOCK_STATS.feed);
+  const [detail, setDetail] = useState(null);
+  const [loading, setLoading] = useState(true);
   const feedRef = useRef(null);
 
   useEffect(() => {
-    const interval = setInterval(async () => {
-      try {
-        // const res = await fetch(`${API}/logs?session_id=${session.id}`);
-        // const data = await res.json();
-        // setFeed(data.logs);
-      } catch {}
-    }, 5000);
-    return () => clearInterval(interval);
+    if (!session?.session_id) return;
+    setLoading(true);
+    fetchSession(session.session_id)
+      .then(data => setDetail(data))
+      .catch(err => console.error("Failed to load session detail:", err))
+      .finally(() => setLoading(false));
   }, [session]);
+
+  // Derive stats from the API detail data
+  const results = detail?.results || [];
+  // Group by category for chart data
+  const categoryMap = {};
+  let totalKg = 0;
+  results.forEach(r => {
+    if (!categoryMap[r.category]) categoryMap[r.category] = 0;
+    categoryMap[r.category] += r.amount_kg;
+    totalKg += r.amount_kg;
+  });
+  const chartData = Object.entries(categoryMap)
+    .map(([label, kg]) => ({ label, kg, pct: totalKg > 0 ? Math.round((kg / totalKg) * 100) : 0 }))
+    .sort((a, b) => b.kg - a.kg);
+
+  // Most wasted category
+  const mostWasted = chartData.length > 0 ? chartData[0].label : "N/A";
+
+  // Feed: individual detections as a chronological list
+  const feed = results.map((r, i) => ({
+    item: r.category,
+    waste: Number(r.amount_kg).toFixed(2) + " kg",
+    confidence: Math.round((r.confidence || 0) * 100) + "%",
+  }));
 
   const now = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
     + " | " + new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
@@ -316,11 +373,18 @@ function DashboardScreen({ session, onBack, onNavigate, settings }) {
             </p>
           </div>
 
+          {loading ? (
+            <div className="text-center py-16">
+              <div className="w-10 h-10 rounded-full border-4 border-emerald-800 border-t-emerald-400 animate-spin mx-auto mb-4" />
+              <p className="text-gray-400 text-sm">Loading session data…</p>
+            </div>
+          ) : (
+          <>
           <section className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
             {[
-              { label: "Total Items Detected Today", value: stats.totalItems.toLocaleString(), sub: "+12% vs avg", subColor: "#51904e", barColor: "#51904e", barWidth: "75%" },
-              { label: `Average Waste %`, value: `${stats.avgWaste}%`, sub: "+2% increase", subColor: "#ef4444", barColor: "#ef4444", barWidth: `${stats.avgWaste}%` },
-              { label: "Most Wasted Item", value: stats.mostWasted, sub: "Target for portion adjustment", icon: true },
+              { label: "Total Detections", value: results.length.toLocaleString(), sub: `${totalKg.toFixed(2)} kg total`, subColor: "#51904e", barColor: "#51904e", barWidth: "75%" },
+              { label: "Total Waste", value: `${totalKg.toFixed(2)} kg`, sub: `${chartData.length} categories`, subColor: "#f59e0b", barColor: "#f59e0b", barWidth: "50%" },
+              { label: "Most Wasted Category", value: mostWasted, sub: "Top category by weight", icon: true },
             ].map(card => (
               <div key={card.label} className="p-6 rounded-lg" style={{ background: "#1C1C1C", border: "1px solid rgba(255,255,255,0.05)" }}>
                 <p className="text-sm font-medium mb-1" style={{ color: "#9ca3af" }}>{card.label}</p>
@@ -348,20 +412,19 @@ function DashboardScreen({ session, onBack, onNavigate, settings }) {
           <main className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <section className="lg:col-span-2 p-8 rounded-lg" style={{ background: "#1C1C1C", border: "1px solid rgba(255,255,255,0.05)" }}>
               <div className="flex items-center justify-between mb-8">
-                <h2 className="text-xl font-semibold">Most Wasted Food Items Today</h2>
-                <select className="text-xs rounded-md px-2 py-1 outline-none"
-                  style={{ background: "#121212", border: "1px solid rgba(255,255,255,0.1)", color: "#9ca3af" }}>
-                  <option>All Stations</option><option>Hot Bar</option><option>Salad Bar</option>
-                </select>
+                <h2 className="text-xl font-semibold">Waste by Category</h2>
               </div>
+              {chartData.length === 0 ? (
+                <p className="text-gray-500 text-sm text-center py-8">No detection results for this session</p>
+              ) : (
               <div className="space-y-5">
-                {stats.chartData.map(row => {
+                {chartData.map(row => {
                   const c = wasteColor(row.pct);
                   return (
                     <div key={row.label} className="space-y-1.5">
                       <div className="flex justify-between text-sm">
-                        <span style={{ color: "#d1d5db" }}>{row.label}</span>
-                        <span className="font-mono font-bold" style={{ color: c }}>{row.pct}%</span>
+                        <span style={{ color: "#d1d5db" }} className="capitalize">{row.label}</span>
+                        <span className="font-mono font-bold" style={{ color: c }}>{row.pct}% · {row.kg.toFixed(2)} kg</span>
                       </div>
                       <div className="h-6 w-full rounded overflow-hidden" style={{ background: "#2D2D2D" }}>
                         <div className="h-full rounded" style={{ width: `${row.pct}%`, background: c }} />
@@ -370,6 +433,7 @@ function DashboardScreen({ session, onBack, onNavigate, settings }) {
                   );
                 })}
               </div>
+              )}
               <div className="mt-8 pt-5 flex gap-5 text-xs flex-wrap" style={{ borderTop: "1px solid rgba(255,255,255,0.05)", color: "#6b7280" }}>
                 {[["#51904e","Low Waste (< 15%)"],["#f59e0b","Moderate (15-30%)"],["#ef4444","High Waste (> 30%)"]].map(([c,l]) => (
                   <div key={l} className="flex items-center gap-1.5">
@@ -381,29 +445,25 @@ function DashboardScreen({ session, onBack, onNavigate, settings }) {
 
             <section className="lg:col-span-1 flex flex-col rounded-lg overflow-hidden" style={{ background: "#1C1C1C", border: "1px solid rgba(255,255,255,0.05)" }}>
               <div className="p-5 flex items-center justify-between" style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
-                <h2 className="text-lg font-semibold">Recent Detections</h2>
-                <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style={{ background: "#51904e" }} />
-                  <span className="relative inline-flex rounded-full h-2 w-2" style={{ background: "#51904e" }} />
-                </span>
+                <h2 className="text-lg font-semibold">Detection Results</h2>
+                <span className="text-xs text-gray-500">{feed.length} items</span>
               </div>
               <div ref={feedRef} className="flex-1 overflow-y-auto p-4 space-y-3" style={{ maxHeight: 460 }}>
-                {feed.map((entry, i) => {
-                  const c = wasteColor(entry.waste);
-                  return (
+                {feed.length === 0 ? (
+                  <p className="text-gray-500 text-sm text-center py-8">No detections recorded</p>
+                ) : feed.map((entry, i) => (
                     <div key={i} className="flex items-center justify-between p-3 rounded-md"
-                      style={{ background: "rgba(255,255,255,0.04)", borderLeft: `3px solid ${c}` }}>
+                      style={{ background: "rgba(255,255,255,0.04)", borderLeft: "3px solid #51904e" }}>
                       <div>
-                        <p className="font-medium text-sm">{entry.item}</p>
-                        <p className="text-xs mt-0.5" style={{ color: "#6b7280" }}>{entry.time}</p>
+                        <p className="font-medium text-sm capitalize">{entry.item}</p>
+                        <p className="text-xs mt-0.5" style={{ color: "#6b7280" }}>Confidence: {entry.confidence}</p>
                       </div>
                       <div className="text-right">
-                        <span className="font-bold text-sm" style={{ color: c }}>{entry.waste}%</span>
-                        <p className="text-xs uppercase tracking-wider" style={{ color: "#4b5563" }}>Waste</p>
+                        <span className="font-bold text-sm" style={{ color: "#51904e" }}>{entry.waste}</span>
+                        <p className="text-xs uppercase tracking-wider" style={{ color: "#4b5563" }}>Weight</p>
                       </div>
                     </div>
-                  );
-                })}
+                ))}
               </div>
               <button className="w-full py-4 text-sm font-medium transition-colors" style={{ borderTop: "1px solid rgba(255,255,255,0.05)", color: "#6b7280" }}
                 onMouseEnter={e => e.currentTarget.style.color = "#f3f4f6"}
@@ -415,6 +475,8 @@ function DashboardScreen({ session, onBack, onNavigate, settings }) {
           <footer className="mt-12 text-center text-xs uppercase tracking-widest" style={{ color: "#374151" }}>
             AI Vision Waste Management System v2.4.0
           </footer>
+          </>
+          )}
         </div>
       </div>
     </div>
