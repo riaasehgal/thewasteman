@@ -17,7 +17,7 @@ import urllib.error
 from datetime import datetime, timezone
 
 import RPi.GPIO as GPIO
-from lcd_pwm import HD44780_PWM
+from RPLCD.gpio import CharLCD
 
 # Add the restapi directory to path so we can import server modules
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -53,13 +53,6 @@ def _cleanup_gpio():
         GPIO.cleanup()
     except Exception:
         pass
-    # Also force-release pins via pinctrl so they're free for next run
-    for pin in [25, 24, 23, 17, 18, 22]:
-        try:
-            subprocess.run(["pinctrl", "set", str(pin), "ip"],
-                           capture_output=True, timeout=2)
-        except Exception:
-            pass
 
 
 # Register cleanup so GPIO is always released on exit / kill
@@ -112,7 +105,7 @@ def _force_free_lcd_pins():
 
 
 def init_lcd():
-    """Initialise the 16×2 character LCD using PWM on RS/E pins."""
+    """Initialise the 16×2 character LCD."""
     global _lcd_ref
     try:
         # Suppress "channel already in use" warnings from previous runs
@@ -121,7 +114,7 @@ def init_lcd():
         # Kill any stale daemon that may be holding the pins
         _kill_stale_daemon()
 
-        # Force-free pins at lgpio level (survives process crashes)
+        # Force-free pins
         _force_free_lcd_pins()
 
         # Clean up any leftover GPIO state in this process
@@ -132,23 +125,17 @@ def init_lcd():
 
         GPIO.setmode(GPIO.BCM)
 
-        # Use pinctrl to force pins into output mode at the hardware level
-        # (required on RPi 5 RP1 chip before PWM/GPIO works reliably)
-        for pin in [25, 24, 23, 17, 18, 22]:
-            try:
-                subprocess.run(["pinctrl", "set", str(pin), "op"],
-                               capture_output=True, timeout=2)
-            except Exception:
-                pass
-
-        lcd = HD44780_PWM(
-            pin_rs=25,         # PWM — Register Select
-            pin_e=24,          # PWM — Enable
+        lcd = CharLCD(
+            numbering_mode=GPIO.BCM,
+            pin_rs=25,
+            pin_e=24,
             pins_data=[23, 17, 18, 22],
             cols=16,
             rows=2,
+            compat_mode=True,
+            auto_linebreaks=False,
         )
-        time.sleep(0.5)        # let the controller finish reset
+        time.sleep(0.5)
 
         # Store for cleanup
         _lcd_ref = lcd
@@ -156,13 +143,13 @@ def init_lcd():
         # Startup test: show a message so the user knows the LCD works
         lcd.clear()
         time.sleep(0.05)
-        lcd.set_cursor(0, 0)
+        lcd.cursor_pos = (0, 0)
         lcd.write_string("TrashTrack")
-        lcd.set_cursor(1, 0)
+        lcd.cursor_pos = (1, 0)
         lcd.write_string("LCD OK!")
-        time.sleep(1.5)        # hold the test message briefly
+        time.sleep(1.5)
 
-        print("LCD initialised (PWM mode) — test message displayed.")
+        print("LCD initialised — test message displayed.")
         return lcd
     except Exception as e:
         print(f"WARNING: LCD init failed ({e}) — running without display.")
@@ -177,14 +164,12 @@ def lcd_update(lcd, category: str | None):
     try:
         lcd.clear()
         time.sleep(0.05)             # give HD44780 time to process clear
-        lcd.set_cursor(0, 0)
+        lcd.cursor_pos = (0, 0)
         lcd.write_string("Food Wasted")
-        lcd.set_cursor(1, 0)
+        lcd.cursor_pos = (1, 0)
         if category and category.lower() in LCD_BARS:
             bars = LCD_BARS[category.lower()]
-            # chr(0xFF) is the solid block character on HD44780 controllers
-            for _ in range(bars):
-                lcd.write_char(0xFF)
+            lcd.write_string(chr(0xFF) * bars)
         else:
             lcd.write_string("No detection")
     except Exception as e:
