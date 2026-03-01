@@ -1,0 +1,15 @@
+# Requirements for running on Raspberry Pi 5 (aarch64, CPU-only)
+# Use system Python (which has picamera2 pre-installed)
+
+fastapi[standard]
+starlette
+pydantic
+numpy
+ultralytics
+uvicorn
+gunicorn
+opencv-python-headless
+Pillow
+
+# PyTorch CPU-only for aarch64 - install separately:
+# pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cpu
