@@ -11,4 +11,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 export function migrate(db) {
   const sql = readFileSync(join(__dirname, 'schema.sql'), 'utf-8');
   db.exec(sql);
+
+  // Add columns that may not exist in older databases
+  const addCol = (table, col, type) => {
+    try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`); } catch (_) { /* already exists */ }
+  };
+  addCol('sessions', 'name', 'TEXT');
+  addCol('sessions', 'meal_type', 'TEXT');
 }

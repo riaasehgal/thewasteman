@@ -2,31 +2,67 @@ import { useState, useEffect, useRef } from "react";
 import Sidebar from "../components/Sidebar.jsx";
 import Header from "../components/Header.jsx";
 import { wasteColor, formatTime } from "../utils/helpers.js";
-import { fetchSessionStats } from "../data/mockDb.js";
+import { getSessionStats, stopSession } from "../services/api.js";
 
 export default function Dashboard({ session, onBack, onNavigate, settings }) {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [isActive, setIsActive] = useState(session?.active ?? !session?.end_time);
+  const [stopping, setStopping] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
   const feedRef = useRef(null);
 
   useEffect(() => {
     if (!session) return;
+    setIsActive(session.active ?? !session.end_time);
     setLoading(true);
-    fetchSessionStats(session.id).then(data => {
+    getSessionStats(session.id).then(data => {
       setStats(data);
+      setLoading(false);
+    }).catch(err => {
+      console.error("Failed to load session stats:", err);
       setLoading(false);
     });
 
-    // Poll for live feed every 5s
+    // Poll for live feed every 5s while active
     const interval = setInterval(async () => {
       try {
-        // TODO: uncomment when backend ready
-        // const data = await fetch(`/api/sessions/${session.id}/stats`).then(r => r.json());
-        // setStats(data);
+        const data = await getSessionStats(session.id);
+        setStats(data);
       } catch {}
     }, 5000);
     return () => clearInterval(interval);
   }, [session]);
+
+  // Elapsed time counter for active sessions
+  useEffect(() => {
+    if (!isActive || !session?.start_time) return;
+    const startMs = new Date(session.start_time).getTime();
+    const tick = () => setElapsed(Math.floor((Date.now() - startMs) / 1000));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [isActive, session?.start_time]);
+
+  async function handleStop() {
+    if (stopping) return;
+    setStopping(true);
+    try {
+      await stopSession(session.id);
+      setIsActive(false);
+    } catch (err) {
+      console.error("Failed to stop session:", err);
+      alert("Failed to stop session: " + err.message);
+    }
+    setStopping(false);
+  }
+
+  function formatElapsed(sec) {
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = sec % 60;
+    return `${h > 0 ? h + "h " : ""}${m}m ${s}s`;
+  }
 
   const now = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
     + " | " + new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
@@ -37,11 +73,18 @@ export default function Dashboard({ session, onBack, onNavigate, settings }) {
     <div className="min-h-screen" style={{ background: "#121212", color: "#f3f4f6", fontFamily: "'Public Sans', sans-serif" }}>
       <Header title={settings.cafeteriaName}>
         <div className="flex items-center gap-3">
-          <div className="px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider"
-            style={{ background: "rgba(81,144,78,0.1)", border: "1px solid rgba(81,144,78,0.2)", color: "#51904e" }}>
-            <span className="inline-block w-2 h-2 rounded-full mr-2 animate-pulse" style={{ background: "#51904e" }} />
-            Live
-          </div>
+          {isActive ? (
+            <div className="px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider"
+              style={{ background: "rgba(81,144,78,0.1)", border: "1px solid rgba(81,144,78,0.2)", color: "#51904e" }}>
+              <span className="inline-block w-2 h-2 rounded-full mr-2 animate-pulse" style={{ background: "#51904e" }} />
+              Live · {formatElapsed(elapsed)}
+            </div>
+          ) : (
+            <div className="px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider"
+              style={{ background: "rgba(107,114,128,0.1)", border: "1px solid rgba(107,114,128,0.2)", color: "#6b7280" }}>
+              Session Ended
+            </div>
+          )}
           <span className="text-sm hidden md:block" style={{ color: "#6b7280" }}>{now}</span>
         </div>
       </Header>
@@ -58,12 +101,30 @@ export default function Dashboard({ session, onBack, onNavigate, settings }) {
               onMouseLeave={e => e.currentTarget.style.color = "#6b7280"}>
               ← Back to Sessions
             </button>
-            <h1 className="text-3xl font-bold">{session ? session.name : "Dashboard"}</h1>
-            <p className="mt-1" style={{ color: "#6b7280" }}>
-              {timeRange
-                ? `${formatTime(timeRange.start)} – ${formatTime(timeRange.end)}`
-                : "Real-time detection and analytics"}
-            </p>
+            <div className="flex items-center justify-between flex-wrap gap-4">
+              <div>
+                <h1 className="text-3xl font-bold">{session ? session.name : "Dashboard"}</h1>
+                <p className="mt-1" style={{ color: "#6b7280" }}>
+                  {isActive
+                    ? "Recording — Pi camera is detecting food waste in real time"
+                    : timeRange
+                      ? `${formatTime(timeRange.start)} – ${formatTime(timeRange.end)}`
+                      : "Session complete"}
+                </p>
+              </div>
+              {isActive && (
+                <button onClick={handleStop} disabled={stopping}
+                  className="px-6 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2"
+                  style={{
+                    background: stopping ? "rgba(239,68,68,0.3)" : "#ef4444",
+                    color: "#fff",
+                    cursor: stopping ? "not-allowed" : "pointer",
+                  }}>
+                  <span className="w-3 h-3 rounded-sm" style={{ background: "#fff" }} />
+                  {stopping ? "Stopping..." : "End Session"}
+                </button>
+              )}
+            </div>
           </div>
 
           {loading || !stats ? (
@@ -144,10 +205,14 @@ export default function Dashboard({ session, onBack, onNavigate, settings }) {
                 <section className="lg:col-span-1 flex flex-col rounded-lg overflow-hidden" style={{ background: "#1C1C1C", border: "1px solid rgba(255,255,255,0.05)" }}>
                   <div className="p-5 flex items-center justify-between" style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
                     <h2 className="text-lg font-semibold">Recent Detections</h2>
-                    <span className="relative flex h-2 w-2">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style={{ background: "#51904e" }} />
-                      <span className="relative inline-flex rounded-full h-2 w-2" style={{ background: "#51904e" }} />
-                    </span>
+                    {isActive ? (
+                      <span className="relative flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style={{ background: "#51904e" }} />
+                        <span className="relative inline-flex rounded-full h-2 w-2" style={{ background: "#51904e" }} />
+                      </span>
+                    ) : (
+                      <span className="text-xs font-bold uppercase" style={{ color: "#6b7280" }}>Ended</span>
+                    )}
                   </div>
                   <div ref={feedRef} className="flex-1 overflow-y-auto p-4 space-y-3" style={{ maxHeight: 460 }}>
                     {stats.feed.map((entry, i) => {

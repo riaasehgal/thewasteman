@@ -1,0 +1,12 @@
+{
+  "session_id": "0c2d1642-9992-443c-99bd-4b2a4d73901b",
+  "device_id": "rpi5-001",
+  "start_time": "2026-02-28T22:55:08.345381+00:00",
+  "end_time": "2026-02-28T22:55:22.952756+00:00",
+  "summary": {
+    "total_items": 0,
+    "categories_detected": 0,
+    "category_breakdown": {}
+  },
+  "results": []
+}

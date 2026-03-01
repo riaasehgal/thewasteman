@@ -6,6 +6,10 @@ import { handleHealth } from './routes/health.js';
 import { handleSessionsList } from './routes/sessionsList.js';
 import { handleSessionGet } from './routes/sessionGet.js';
 import { handleSessionIngest } from './routes/sessionIngest.js';
+import { handleSessionStart } from './routes/sessionStart.js';
+import { handleSessionStop } from './routes/sessionStop.js';
+import { handleSessionActive } from './routes/sessionActive.js';
+import { handleAddDetections } from './routes/sessionAddDetections.js';
 import { tryServeStatic } from './static.js';
 
 // --------------- helpers ---------------
@@ -49,6 +53,38 @@ async function router(req, res) {
     if (req.method === 'GET' && pathname === '/api/health') {
       handleHealth(req, res);
       log(req, 200);
+      return;
+    }
+
+    // POST /api/sessions/start — UI creates a new active session
+    // (must be matched BEFORE the generic /api/sessions route)
+    if (req.method === 'POST' && pathname === '/api/sessions/start') {
+      await handleSessionStart(req, res);
+      log(req, res.statusCode);
+      return;
+    }
+
+    // GET /api/sessions/active — currently active session
+    // (must be matched BEFORE the generic /api/sessions route)
+    if (req.method === 'GET' && pathname === '/api/sessions/active') {
+      handleSessionActive(req, res);
+      log(req, res.statusCode);
+      return;
+    }
+
+    // POST /api/sessions/:session_id/stop
+    const stopMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/stop$/);
+    if (req.method === 'POST' && stopMatch) {
+      handleSessionStop(req, res, stopMatch[1]);
+      log(req, res.statusCode);
+      return;
+    }
+
+    // POST /api/sessions/:session_id/detections
+    const detectionsMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/detections$/);
+    if (req.method === 'POST' && detectionsMatch) {
+      await handleAddDetections(req, res, detectionsMatch[1]);
+      log(req, res.statusCode);
       return;
     }
 

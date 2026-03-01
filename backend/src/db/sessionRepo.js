@@ -7,7 +7,7 @@ export function listSessions({ limit = 20, offset = 0 } = {}) {
   const db = getDb();
   const rows = db
     .prepare(
-      `SELECT session_id, device_id, start_time, end_time, duration_sec, summary_json, created_at
+      `SELECT session_id, device_id, name, meal_type, start_time, end_time, duration_sec, summary_json, created_at
        FROM sessions
        ORDER BY start_time DESC
        LIMIT ? OFFSET ?`
@@ -47,7 +47,7 @@ export function getSession(sessionId) {
   const db = getDb();
   const row = db
     .prepare(
-      `SELECT session_id, device_id, start_time, end_time, duration_sec, summary_json, created_at
+      `SELECT session_id, device_id, name, meal_type, start_time, end_time, duration_sec, summary_json, created_at
        FROM sessions WHERE session_id = ?`
     )
     .get(sessionId);
@@ -75,21 +75,23 @@ export function getSession(sessionId) {
 /* ------------------------------------------------------------------ */
 /*  Upsert a session (idempotent by session_id)                       */
 /* ------------------------------------------------------------------ */
-export function upsertSession({ session_id, device_id, start_time, end_time, duration_sec, summary }) {
+export function upsertSession({ session_id, device_id, name, meal_type, start_time, end_time, duration_sec, summary }) {
   const db = getDb();
   const summaryJson = summary ? JSON.stringify(summary) : null;
 
   db.prepare(
-    `INSERT INTO sessions (session_id, device_id, start_time, end_time, duration_sec, summary_json)
-     VALUES (?, ?, ?, ?, ?, ?)
+    `INSERT INTO sessions (session_id, device_id, name, meal_type, start_time, end_time, duration_sec, summary_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(session_id) DO UPDATE SET
        device_id    = excluded.device_id,
+       name         = excluded.name,
+       meal_type    = excluded.meal_type,
        start_time   = excluded.start_time,
        end_time     = excluded.end_time,
        duration_sec = excluded.duration_sec,
        summary_json = excluded.summary_json,
        updated_at   = datetime('now')`
-  ).run(session_id, device_id, start_time, end_time ?? null, duration_sec ?? null, summaryJson);
+  ).run(session_id, device_id, name ?? null, meal_type ?? null, start_time, end_time ?? null, duration_sec ?? null, summaryJson);
 }
 
 /* ------------------------------------------------------------------ */
@@ -99,6 +101,8 @@ function formatSession(row) {
   return {
     session_id: row.session_id,
     device_id: row.device_id,
+    name: row.name ?? null,
+    meal_type: row.meal_type ?? null,
     start_time: row.start_time,
     end_time: row.end_time,
     duration_sec: row.duration_sec,

@@ -4,6 +4,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   session_id    TEXT    NOT NULL UNIQUE,
   device_id     TEXT    NOT NULL,
+  name          TEXT,
+  meal_type     TEXT,
   start_time    TEXT    NOT NULL,
   end_time      TEXT,
   duration_sec  INTEGER,

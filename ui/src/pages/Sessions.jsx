@@ -2,20 +2,58 @@ import { useState, useEffect } from "react";
 import Sidebar from "../components/Sidebar.jsx";
 import Header from "../components/Header.jsx";
 import { wasteBadge, formatTime, getSessionImage } from "../utils/helpers.js";
-import { fetchSessions } from "../data/mockDb.js";
+import { getSessions, createSession } from "../services/api.js";
 
 export default function Sessions({ onSelect, onNavigate, settings }) {
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("All Sessions");
+  const [showModal, setShowModal] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newType, setNewType] = useState("Lunch");
   const tabs = ["All Sessions", "Breakfast", "Lunch", "Dinner"];
 
-  useEffect(() => {
-    fetchSessions().then(data => {
+  function loadSessions() {
+    setLoading(true);
+    getSessions().then(data => {
       setSessions(data);
       setLoading(false);
+    }).catch(err => {
+      console.error("Failed to load sessions:", err);
+      setLoading(false);
     });
-  }, []);
+  }
+
+  useEffect(() => { loadSessions(); }, []);
+
+  async function handleCreate() {
+    if (creating) return;
+    setCreating(true);
+    try {
+      const name = newName.trim() || `${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" })} — ${newType}`;
+      const result = await createSession({ name, meal_type: newType });
+      setShowModal(false);
+      setNewName("");
+      setNewType("Lunch");
+      // Navigate directly to the live dashboard for this new session
+      onSelect({
+        id: result.session_id,
+        name: result.name || name,
+        type: newType,
+        date: new Date().toISOString().split("T")[0],
+        items: 0,
+        waste: 0,
+        active: true,
+        start_time: result.start_time,
+        end_time: null,
+      });
+    } catch (err) {
+      console.error("Failed to create session:", err);
+      alert("Failed to create session: " + err.message);
+    }
+    setCreating(false);
+  }
 
   const visible = filter === "All Sessions"
     ? sessions
@@ -100,7 +138,8 @@ export default function Sessions({ onSelect, onNavigate, settings }) {
                 })}
 
                 {/* Add new session card */}
-                <div className="flex flex-col items-center justify-center rounded-xl p-8 cursor-pointer transition-all min-h-[300px]"
+                <div onClick={() => setShowModal(true)}
+                  className="flex flex-col items-center justify-center rounded-xl p-8 cursor-pointer transition-all min-h-[300px]"
                   style={{ border: "2px dashed rgba(255,255,255,0.1)", background: "#1C1C1C" }}
                   onMouseEnter={e => { e.currentTarget.style.borderColor = "#51904e"; e.currentTarget.style.background = "rgba(81,144,78,0.05)"; }}
                   onMouseLeave={e => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)"; e.currentTarget.style.background = "#1C1C1C"; }}>
@@ -128,6 +167,54 @@ export default function Sessions({ onSelect, onNavigate, settings }) {
           </div>
         </div>
       </div>
+
+      {/* Create Session Modal */}
+      {showModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.6)" }}
+          onClick={() => setShowModal(false)}>
+          <div className="rounded-2xl p-8 w-full max-w-md space-y-6"
+            style={{ background: "#1C1C1C", border: "1px solid rgba(255,255,255,0.1)" }}
+            onClick={e => e.stopPropagation()}>
+            <h2 className="text-xl font-bold">New Session</h2>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium" style={{ color: "#9ca3af" }}>Session Name (optional)</label>
+              <input value={newName} onChange={e => setNewName(e.target.value)}
+                placeholder={`${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" })} — ${newType}`}
+                className="w-full px-4 py-2.5 rounded-xl text-sm outline-none"
+                style={{ background: "#121212", border: "1px solid rgba(255,255,255,0.1)", color: "#f3f4f6" }} />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium" style={{ color: "#9ca3af" }}>Meal Type</label>
+              <div className="flex gap-2">
+                {["Breakfast", "Lunch", "Dinner"].map(t => (
+                  <button key={t} onClick={() => setNewType(t)}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-bold transition-all"
+                    style={newType === t
+                      ? { background: "#51904e", color: "#fff" }
+                      : { background: "rgba(255,255,255,0.05)", color: "#9ca3af", border: "1px solid rgba(255,255,255,0.1)" }}>
+                    {t}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button onClick={() => setShowModal(false)}
+                className="flex-1 py-2.5 rounded-xl text-sm font-bold transition-all"
+                style={{ background: "rgba(255,255,255,0.05)", color: "#9ca3af", border: "1px solid rgba(255,255,255,0.1)" }}>
+                Cancel
+              </button>
+              <button onClick={handleCreate} disabled={creating}
+                className="flex-1 py-2.5 rounded-xl text-sm font-bold transition-all"
+                style={{ background: creating ? "rgba(81,144,78,0.3)" : "#51904e", color: "#fff", cursor: creating ? "not-allowed" : "pointer" }}>
+                {creating ? "Starting..." : "Start Session"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
