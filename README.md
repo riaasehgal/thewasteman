@@ -52,6 +52,6 @@ This script will:
 ## 🛠️ Technology Stack
 - **Frontend**: React, Vite, TailwindCSS
 - **Backend**: Node.js, SQLite (`better-sqlite3`)
-- **Machine Learning**: Python, PyTorch, YOLOv11, FastAPI
+- **Machine Learning**: Python, PyTorch, FastAPI
 - **Hardware**: Raspberry Pi 5, Raspberry Pi Camera Module
 
