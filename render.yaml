@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: wasteman-backend
+    env: node
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DB_PATH
+        value: /data/trashtrack.sqlite
+    disk:
+      name: sqlite-data
+      mountPath: /data
+      sizeGB: 1

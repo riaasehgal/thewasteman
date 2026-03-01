@@ -2,8 +2,11 @@
 // All backend calls live here. Pages NEVER call fetch() directly.
 // The Vite dev server proxies /api → http://localhost:3001
 
+const API_BASE = import.meta.env.VITE_API_URL || "";
+
 async function request(path, options = {}) {
-  const res = await fetch(path, {
+  const url = path.startsWith("http") ? path : `${API_BASE}${path}`;
+  const res = await fetch(url, {
     headers: { "Content-Type": "application/json" },
     ...options,
   });
@@ -148,7 +151,8 @@ export const getAiRecommendation = (prompt, reportData = null) => {
 export async function detectImage(imageFile) {
   const formData = new FormData();
   formData.append("file", imageFile);
-  const res = await fetch("/api/detect", { method: "POST", body: formData });
+  const url = `/api/detect`.startsWith("http") ? `/api/detect` : `${API_BASE}/api/detect`;
+  const res = await fetch(url, { method: "POST", body: formData });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error ?? `${res.status} ${res.statusText}`);
